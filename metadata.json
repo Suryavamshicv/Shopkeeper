@@ -1,0 +1,6 @@
+{
+  "name": "Shopkeeper",
+  "description": "Frictionless, scan-as-you-shop supermarket checkout system. No app installation required.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}
