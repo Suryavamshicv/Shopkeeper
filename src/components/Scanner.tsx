@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Html5QrcodeScanner, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { Scan, X, Keyboard, ArrowRight } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { BrowserMultiFormatReader, NotFoundException, ChecksumException, FormatException } from '@zxing/library';
+import { motion } from 'motion/react';
+import { X, AlertCircle } from 'lucide-react';
 
 interface ScannerProps {
   onScan: (barcode: string) => void;
@@ -9,146 +9,155 @@ interface ScannerProps {
 }
 
 export default function Scanner({ onScan, onClose }: ScannerProps) {
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
-  const [manualInput, setManualInput] = useState('');
-  const [isManual, setIsManual] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const scannedRef = useRef(false);
+  const streamRef = useRef<MediaStream | null>(null);
+  const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
 
   useEffect(() => {
-    if (isManual) return;
+    let active = true;
+    const codeReader = new BrowserMultiFormatReader();
+    codeReaderRef.current = codeReader;
+    scannedRef.current = false;
 
-    // Initializing the scanner with explicit support for common supermarket barcodes
-    const scanner = new Html5QrcodeScanner(
-      "reader",
-      { 
-        fps: 20, // Increased FPS for faster detection
-        qrbox: { width: 280, height: 200 }, // Slightly larger box
-        aspectRatio: 1.0,
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.QR_CODE
-        ]
-      },
-      /* verbose= */ false
-    );
+    const secureLocalhost = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+    const supportsSecure = window.isSecureContext || secureLocalhost;
 
-    scanner.render(
-      (decodedText) => {
-        onScan(decodedText);
-        // Haptic feedback for successful scan
-        if ('vibrate' in navigator) navigator.vibrate(100);
-      },
-      (error) => {
-        // Quietly handle errors
+    async function startScanner() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('Camera API is not supported by this browser.');
+        setIsLoading(false);
+        return;
       }
-    );
 
-    scannerRef.current = scanner;
+      if (!supportsSecure) {
+        setError('Camera access requires HTTPS or localhost.');
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setError(null);
+        setIsLoading(true);
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        const backCamera = videoDevices.find(device =>
+          /back|rear|environment/i.test(device.label)
+        );
+
+        const constraints: MediaStreamConstraints = {
+          video: {
+            deviceId: backCamera?.deviceId ? { exact: backCamera.deviceId } : undefined,
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        };
+
+        streamRef.current = await navigator.mediaDevices.getUserMedia(constraints);
+
+        if (!videoRef.current) {
+          throw new Error('Video element not found');
+        }
+
+        videoRef.current.srcObject = streamRef.current;
+        videoRef.current.playsInline = true;
+        videoRef.current.muted = true;
+        await videoRef.current.play();
+
+        if (!active) return;
+        setIsLoading(false);
+
+        codeReader.decodeFromVideoDevice(
+          backCamera?.deviceId,
+          videoRef.current,
+          (result, err) => {
+            if (!active) return;
+
+            if (result?.getText() && !scannedRef.current) {
+              scannedRef.current = true;
+              onScan(result.getText());
+            }
+
+            if (err && !(err instanceof NotFoundException || err instanceof ChecksumException || err instanceof FormatException)) {
+              console.warn('Barcode scan error:', err);
+            }
+          }
+        );
+      } catch (err: any) {
+        if (!active) return;
+        console.error('Camera access error:', err);
+
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          setError('Camera permission denied. Allow access in browser settings.');
+        } else if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
+          setError('No camera found on this device.');
+        } else if (err.name === 'AbortError') {
+          setError('Camera request was aborted. Close other camera apps or refresh the page.');
+        } else {
+          setError(err?.message || 'Unable to access camera.');
+        }
+        setIsLoading(false);
+      }
+    }
+
+    startScanner();
 
     return () => {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(err => console.error("Failed to clear scanner", err));
+      active = false;
+      codeReader.reset();
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
       }
     };
-  }, [onScan, isManual]);
-
-  const handleManualSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (manualInput.trim()) {
-      onScan(manualInput.trim());
-      setManualInput('');
-      setIsManual(false);
-    }
-  };
+  }, [onScan]);
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center p-4"
-    >
-      <div className="absolute top-6 right-6 z-50 flex gap-4">
-        <button 
-          onClick={() => setIsManual(!isManual)}
-          className="p-3 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-md transition-colors"
-          title={isManual ? "Switch to Camera" : "Manual Entry"}
-        >
-          {isManual ? <Scan size={24} /> : <Keyboard size={24} />}
-        </button>
-        <button 
-          onClick={onClose}
-          className="p-3 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-md transition-colors"
-        >
-          <X size={24} />
-        </button>
-      </div>
-
-      <div className="w-full max-w-md relative">
-        <div className="mb-8 text-center text-white">
-          <div className="inline-flex items-center justify-center p-3 bg-blue-600 rounded-none mb-4 border-2 border-black shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">
-            <Scan size={28} />
-          </div>
-          <h2 className="text-3xl font-black uppercase tracking-tighter italic">
-            {isManual ? 'Manual Code' : 'Scanning...'}
-          </h2>
-          <p className="text-white/40 text-[10px] mt-2 font-black uppercase tracking-widest">
-            {isManual ? 'Enter product barcode digits' : 'Align barcode within the frame'}
-          </p>
-        </div>
-
-        <div className="relative border-4 border-white bg-zinc-900 shadow-2xl min-h-[300px] flex items-center justify-center overflow-hidden">
-          {!isManual ? (
-            <div className="relative w-full">
-              <div id="reader" className="w-full"></div>
-              {/* Custom Overlay Grids */}
-              <div className="absolute inset-0 pointer-events-none border-[2rem] border-zinc-900/40">
-                 <div className="absolute inset-0 border-2 border-dashed border-blue-500/30"></div>
-                 <motion.div 
-                   animate={{ top: ['10%', '90%', '10%'] }}
-                   transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                   className="absolute left-0 right-0 h-1 bg-red-500 shadow-[0_0_20px_rgba(239,68,68,0.8)] z-10" 
-                 />
-              </div>
+    <motion.div className="fixed inset-0 z-50 bg-black flex flex-col">
+      <div className="relative flex-1 overflow-hidden">
+        {isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/90 text-white">
+            <div className="text-center">
+              <div className="w-16 h-16 rounded-full border-4 border-white border-t-yellow-300 animate-spin mx-auto mb-4" />
+              <div className="font-black uppercase">Requesting camera access…</div>
             </div>
-          ) : (
-            <motion.form 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              onSubmit={handleManualSubmit}
-              className="p-8 w-full space-y-6"
-            >
-              <input 
-                type="text"
-                value={manualInput}
-                onChange={(e) => setManualInput(e.target.value)}
-                placeholder="BARCODE NUMBER (e.g. 4001)"
-                autoFocus
-                className="w-full bg-white border-4 border-black p-4 text-black font-black text-xl placeholder:text-zinc-300 outline-none"
-              />
-              <button 
-                type="submit"
-                className="w-full h-16 brutalist-button bg-yellow-400 text-black font-black text-xl"
-              >
-                Add Item
-                <ArrowRight size={24} className="ml-2" strokeWidth={3} />
-              </button>
-            </motion.form>
-          )}
-        </div>
+          </div>
+        )}
 
-        <div className="mt-8 p-4 bg-white/5 border border-white/10">
-           <p className="text-[10px] text-white/40 font-black uppercase tracking-widest mb-2">Tips for Mac Users</p>
-           <ul className="text-[10px] text-white/60 space-y-1 font-black uppercase">
-             <li>• Ensure good lighting on the product</li>
-             <li>• Hold the barcode flat and parallel to the lens</li>
-             <li>• Use manual entry (keyboard icon) if focus is poor</li>
-           </ul>
-        </div>
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/90 text-white p-6">
+            <div className="max-w-sm text-center">
+              <AlertCircle size={40} className="mx-auto mb-4" />
+              <p className="font-black uppercase mb-3">{error}</p>
+              <button
+                onClick={onClose}
+                className="mt-4 px-6 py-3 bg-white text-black font-black uppercase border-4 border-black"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
+
+        {!isLoading && !error && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-64 h-64 border-4 border-yellow-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
+          </div>
+        )}
       </div>
+
+      <button
+        onClick={onClose}
+        className="absolute top-6 right-6 z-50 w-14 h-14 bg-black text-white border-4 border-white flex items-center justify-center"
+      >
+        <X size={24} />
+      </button>
     </motion.div>
   );
 }
