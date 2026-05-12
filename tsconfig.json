@@ -6,6 +6,7 @@
     "module": "ESNext",
     "lib": [
       "ES2022",
+      "ES5",
       "DOM",
       "DOM.Iterable"
     ],
