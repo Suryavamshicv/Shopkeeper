@@ -26,6 +26,30 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
     const supportsSecure = window.isSecureContext || secureLocalhost;
 
     async function startScanner() {
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        const backCamera = videoDevices.find(device =>
+          /back|rear|environment/i.test(device.label)
+        );
+        
+      codeReader.decodeFromVideoDevice(
+          backCamera?.deviceId,
+          videoRef.current,
+          (result, err) => {
+            if (!active) return;
+
+            if (result?.getText() && !scannedRef.current) {
+              scannedRef.current = true;
+              onScan(result.getText());
+            }
+
+            if (err && !(err instanceof NotFoundException || err instanceof ChecksumException || err instanceof FormatException)) {
+              console.warn('Barcode scan error:', err);
+            }
+          }
+        );
+        
       if (!navigator.mediaDevices?.getUserMedia) {
         setError('Camera API is not supported by this browser.');
         setIsLoading(false);
@@ -42,11 +66,11 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
         setError(null);
         setIsLoading(true);
 
-        const devices = await navigator.mediaDevices.enumerateDevices();
+        /*const devices = await navigator.mediaDevices.enumerateDevices();
         const videoDevices = devices.filter(device => device.kind === 'videoinput');
         const backCamera = videoDevices.find(device =>
           /back|rear|environment/i.test(device.label)
-        );
+        );*/
 
         const constraints: MediaStreamConstraints = {
           video: {
@@ -72,7 +96,7 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
         if (!active) return;
         setIsLoading(false);
 
-        codeReader.decodeFromVideoDevice(
+        /*codeReader.decodeFromVideoDevice(
           backCamera?.deviceId,
           videoRef.current,
           (result, err) => {
@@ -87,7 +111,8 @@ export default function Scanner({ onScan, onClose }: ScannerProps) {
               console.warn('Barcode scan error:', err);
             }
           }
-        );
+        );*/
+
       } catch (err: any) {
         if (!active) return;
         console.error('Camera access error:', err);
