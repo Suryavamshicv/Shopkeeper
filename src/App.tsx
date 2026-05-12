@@ -9,20 +9,38 @@ import { MOCK_PRODUCTS } from './data/mockProducts';
 import Scanner from './components/Scanner';
 
 export default function App() {
-  const [storeId, setStoreId] = useState<string>('REL-101');
-  const [vendor, setVendor] = useState({ name: 'Reliance Fresh', location: 'Mumbai South', color: 'bg-blue-600' });
+
+  /*const [storeId, setStoreId] = useState<string>('KPN-101');
+  const [vendor, setVendor] = useState({ name: 'KPN Fresh', location: 'Banglore South', color: 'bg-blue-600' });
+  */
+
+  const [storeId, setStoreId] = useState<string>('');
+  const [vendor, setVendor] = useState({ name: '', location: '', color: 'bg-blue-600' });
   
   const [cart, setCart] = useState<CartItem[]>([]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const id = params.get('store');
-    
+    const id = params.get('id');
+    const name = params.get('name');
+    const loc = params.get('location');
+
+    if (id) setStoreId(id);
+    if (name || loc) {
+      setVendor({
+        name: name || 'Default Store',
+        location: loc || 'Unknown Location',
+        color: 'bg-blue-600'
+      });
+    }
+  }, []);
+
     console.log("--- SHOPKEEPER LAUNCH INFO ---");
     console.log("SIMULATE QR LAUNCH BY ADDING '?store=ID' TO URL");
     console.log("VALID IDS: REL-101, MOR-202, BB-303");
     
-    if (id) {
+    
+    /*if (id) {
       setStoreId(id);
       // Simulate fetching vendor config from DB
       const configs: Record<string, any> = {
@@ -32,7 +50,7 @@ export default function App() {
       };
       if (configs[id]) setVendor(configs[id]);
     }
-  }, []);
+  }, []);*/
 
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [lastScanned, setLastScanned] = useState<Product | null>(null);
@@ -431,7 +449,7 @@ export default function App() {
                       type="text" 
                       value={customerName}
                       onChange={(e) => setCustomerName(e.target.value)}
-                      placeholder="e.g. RAJESH KUMAR"
+                      placeholder="YOUR NAME"
                       className="w-full text-2xl font-black tracking-tight outline-none bg-transparent uppercase"
                     />
                  </div>
@@ -444,7 +462,7 @@ export default function App() {
                          maxLength={10}
                          value={mobileNumber}
                          onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, ''))}
-                         placeholder="9876543210"
+                         placeholder="MOBILE NUMBER"
                          className="flex-1 text-2xl font-black tracking-widest outline-none bg-transparent"
                        />
                     </div>
