@@ -42,7 +42,7 @@ export const MOCK_PRODUCTS: Product[] = [
     name: 'Samosa Multipack (4 pcs)',
     price: 60,
     category: 'Snacks',
-    barcode: '4005',
+    barcode: '12345678',
     image: 'https://images.unsplash.com/photo-1601050690597-df056fb1ce24?w=400&auto=format',
     description: 'Crispy outer layer with spiced potato filling.'
   }

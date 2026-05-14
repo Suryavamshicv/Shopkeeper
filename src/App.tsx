@@ -72,7 +72,7 @@ export default function App() {
   const [inputMessage, setInputMessage] = useState('');
 
   const addToCart = (product: Product) => {
-    setCart(prev => {
+    setCart((prev: CartItem[]) => {
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
         return prev.map(item => 
@@ -86,11 +86,11 @@ export default function App() {
   };
 
   const removeFromCart = (productId: string) => {
-    setCart(prev => prev.filter(item => item.id !== productId));
+    setCart((prev: CartItem[]) => prev.filter(item => item.id !== productId));
   };
 
   const updateQuantity = (productId: string, delta: number) => {
-    setCart(prev => prev.map(item => {
+    setCart((prev: CartItem[]) => prev.map(item => {
       if (item.id === productId) {
         const newQty = Math.max(1, item.quantity + delta);
         return { ...item, quantity: newQty };
@@ -99,14 +99,31 @@ export default function App() {
     }));
   };
 
-  const handleScan = (barcode: string) => {
+  const handleScan = async (barcode: string) => {
+    // Log to server (terminal)
+    try {
+      await fetch('/api/scan/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ barcode })
+      });
+    } catch (error) {
+      console.error('Failed to log barcode to server:', error);
+    }
+
+    // Log to browser console as well
+    console.log('Decoded barcode value: ${barcode}');
+    console.log("Decoded barcode value 111111:", barcode);
+    console.log("Looking up product for barcode 222222:", barcode);
+    
     const product = MOCK_PRODUCTS.find(p => p.barcode === barcode);
     if (product) {
+      console.log("inside handleScan, product found " , product.name);
       addToCart(product);
       setIsScannerOpen(false); 
       if ('vibrate' in navigator) navigator.vibrate(50);
       if (step === 'welcome') setStep('shopping');
-    }
+    } 
   };
 
   const generatePDF = () => {
@@ -329,7 +346,7 @@ export default function App() {
     }, 1200);
   };
 
-  const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const total = cart.reduce((sum: number, item: CartItem) => sum + (item.price * item.quantity), 0);
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 font-sans selection:bg-yellow-200">
@@ -427,7 +444,7 @@ export default function App() {
               <ShoppingBag size={20} />
               {cart.length > 0 && (
                 <span className="absolute -top-2 -right-2 w-6 h-6 bg-black text-white text-[10px] flex items-center justify-center font-black border-2 border-white">
-                  {cart.reduce((s, i) => s + i.quantity, 0)}
+                  {cart.reduce((s: number, i: CartItem) => s + i.quantity, 0)}
                 </span>
               )}
             </button>
@@ -572,6 +589,18 @@ export default function App() {
                 <button onClick={() => setIsScannerOpen(true)} className="flex items-center gap-2 font-black uppercase text-xs mb-1">
                   <Plus size={14} /> Scan item
                 </button>
+              </div>
+
+              <div className="mb-6 grid grid-cols-5 gap-2 text-[10px] uppercase font-black">
+                {MOCK_PRODUCTS.map(product => (
+                  <button
+                    key={product.id}
+                    onClick={() => handleScan(product.barcode)}
+                    className="border-4 border-black bg-zinc-100 px-2 py-3 text-center"
+                  >
+                    {product.barcode}
+                  </button>
+                ))}
               </div>
 
               {cart.length === 0 ? (

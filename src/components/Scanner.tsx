@@ -1,188 +1,101 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { BrowserMultiFormatReader, NotFoundException, ChecksumException, FormatException } from '@zxing/library';
-import { motion } from 'motion/react';
-import { X, AlertCircle } from 'lucide-react';
 
-interface ScannerProps {
-  onScan: (barcode: string) => void;
-  onClose: () => void;
-}
-
-export default function Scanner({ onScan, onClose }: ScannerProps) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const scannedRef = useRef(false);
-  const streamRef = useRef<MediaStream | null>(null);
-  const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
+export default function ShopScanner({ onScan, onClose }: { onScan: (val: string) => void, onClose: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // NEW: State to prevent duplicate scans
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [lastScannedCode, setLastScannedCode] = useState<string | null>(null);
 
   useEffect(() => {
-    let active = true;
-    const codeReader = new BrowserMultiFormatReader();
-    codeReaderRef.current = codeReader;
-    scannedRef.current = false;
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 1280, height: 720 } 
+      });
+      if (videoRef.current) videoRef.current.srcObject = stream;
+    }
+    startCamera();
 
-    const secureLocalhost = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
-    const supportsSecure = window.isSecureContext || secureLocalhost;
+    const timer = setInterval(captureFrame, 400);
+    return () => {
+        clearInterval(timer);
+        if (videoRef.current?.srcObject) {
+            (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+        }
+    };
+  }, [isProcessing, lastScannedCode]); // Re-run effect when state changes
 
-    async function startScanner() {
+  const captureFrame = async () => {
+    // 1. Don't capture if we are already waiting for a server response
+    if (!videoRef.current || !canvasRef.current || isProcessing) return;
+    
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    
+    const ctx = canvas.getContext('2d');
+    ctx?.drawImage(video, 0, 0);
 
-      const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
-        const backCamera = videoDevices.find(device =>
-          /back|rear|environment/i.test(device.label)
-        );
-        
-      codeReader.decodeFromVideoDevice(
-          backCamera?.deviceId,
-          videoRef.current,
-          (result, err) => {
-            if (!active) return;
-
-            if (result?.getText() && !scannedRef.current) {
-              scannedRef.current = true;
-              onScan(result.getText());
-            }
-
-            if (err && !(err instanceof NotFoundException || err instanceof ChecksumException || err instanceof FormatException)) {
-              console.warn('Barcode scan error:', err);
-            }
-          }
-        );
-        
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setError('Camera API is not supported by this browser.');
-        setIsLoading(false);
-        return;
-      }
-
-      if (!supportsSecure) {
-        setError('Camera access requires HTTPS or localhost.');
-        setIsLoading(false);
-        return;
-      }
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const formData = new FormData();
+      formData.append('file', blob, 'frame.jpg');
 
       try {
-        setError(null);
-        setIsLoading(true);
+        setIsProcessing(true); // Lock the scanner
 
-        /*const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
-        const backCamera = videoDevices.find(device =>
-          /back|rear|environment/i.test(device.label)
-        );*/
+        const res = await fetch('http://localhost:8000/scan', { method: 'POST', body: formData });
+        const data = await res.json();
 
-        const constraints: MediaStreamConstraints = {
-          video: {
-            deviceId: backCamera?.deviceId ? { exact: backCamera.deviceId } : undefined,
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
-          audio: false
-        };
+        if (data.success) {
+          // 2. CHECK: Is this the same item we JUST scanned?
+          if (data.barcode !== lastScannedCode) {
+            onScan(data.barcode); 
+            setLastScannedCode(data.barcode);
+            
+            // OPTION A: Close scanner immediately after one scan
+            // onClose(); 
 
-        streamRef.current = await navigator.mediaDevices.getUserMedia(constraints);
-
-        if (!videoRef.current) {
-          throw new Error('Video element not found');
-        }
-
-        videoRef.current.srcObject = streamRef.current;
-        videoRef.current.playsInline = true;
-        videoRef.current.muted = true;
-        await videoRef.current.play();
-
-        if (!active) return;
-        setIsLoading(false);
-
-        /*codeReader.decodeFromVideoDevice(
-          backCamera?.deviceId,
-          videoRef.current,
-          (result, err) => {
-            if (!active) return;
-
-            if (result?.getText() && !scannedRef.current) {
-              scannedRef.current = true;
-              onScan(result.getText());
-            }
-
-            if (err && !(err instanceof NotFoundException || err instanceof ChecksumException || err instanceof FormatException)) {
-              console.warn('Barcode scan error:', err);
-            }
+            // OPTION B: Keep scanner open but wait 3 seconds before allowing same item
+            setTimeout(() => {
+                setLastScannedCode(null);
+                setIsProcessing(false);
+            }, 3000); 
+          } else {
+            // Same barcode detected, just unlock for next frame without adding to cart
+            setIsProcessing(false);
           }
-        );*/
-
-      } catch (err: any) {
-        if (!active) return;
-        console.error('Camera access error:', err);
-
-        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          setError('Camera permission denied. Allow access in browser settings.');
-        } else if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
-          setError('No camera found on this device.');
-        } else if (err.name === 'AbortError') {
-          setError('Camera request was aborted. Close other camera apps or refresh the page.');
         } else {
-          setError(err?.message || 'Unable to access camera.');
+          // No barcode found, unlock for the next frame
+          setIsProcessing(false);
         }
-        setIsLoading(false);
+      } catch (e) {
+        setIsProcessing(false);
       }
-    }
-
-    startScanner();
-
-    return () => {
-      active = false;
-      codeReader.reset();
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [onScan]);
+    }, 'image/jpeg', 0.8);
+  };
 
   return (
-    <motion.div className="fixed inset-0 z-50 bg-black flex flex-col">
-      <div className="relative flex-1 overflow-hidden">
-        {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/90 text-white">
-            <div className="text-center">
-              <div className="w-16 h-16 rounded-full border-4 border-white border-t-yellow-300 animate-spin mx-auto mb-4" />
-              <div className="font-black uppercase">Requesting camera access…</div>
+    <div className="fixed inset-0 bg-black/90 flex flex-col items-center justify-center z-[500]">
+      <div className="relative border-4 border-white rounded-lg overflow-hidden">
+        <video ref={videoRef} autoPlay playsInline className="w-[640px] h-[360px] object-cover" />
+        
+        <div className="absolute inset-0 flex items-center justify-center">
+            {/* Visual feedback: Change box color if processing */}
+          <div className={`w-[200px] h-[100px] border-2 shadow-lg ${isProcessing ? 'border-green-500' : 'border-yellow-400'}`}>
+            <div className="bg-yellow-400 text-black text-[10px] px-1 font-bold absolute -top-5 left-0">
+                {isProcessing ? 'PROCESSING...' : 'ALIGN BARCODE HERE'}
             </div>
           </div>
-        )}
-
-        {error && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/90 text-white p-6">
-            <div className="max-w-sm text-center">
-              <AlertCircle size={40} className="mx-auto mb-4" />
-              <p className="font-black uppercase mb-3">{error}</p>
-              <button
-                onClick={onClose}
-                className="mt-4 px-6 py-3 bg-white text-black font-black uppercase border-4 border-black"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        )}
-
-        <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
-
-        {!isLoading && !error && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="w-64 h-64 border-4 border-yellow-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
-          </div>
-        )}
+        </div>
       </div>
-
-      <button
-        onClick={onClose}
-        className="absolute top-6 right-6 z-50 w-14 h-14 bg-black text-white border-4 border-white flex items-center justify-center"
-      >
-        <X size={24} />
+      
+      <canvas ref={canvasRef} className="hidden" />
+      <button onClick={onClose} className="mt-8 bg-red-600 text-white px-10 py-2 rounded-full font-bold">
+        DONE
       </button>
-    </motion.div>
+    </div>
   );
 }

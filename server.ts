@@ -2,9 +2,13 @@ import express from "express";
 import path from "path";
 import cors from "cors";
 import { createServer as createViteServer } from "vite";
+import { createServer as createHttpServer } from "http";
+import { WebSocketServer } from "ws";
 
 async function startServer() {
   const app = express();
+  const httpServer = createHttpServer(app);
+  const wss = new WebSocketServer({ server: httpServer });
   const PORT = 3000;
 
   app.use(cors());
@@ -68,6 +72,50 @@ async function startServer() {
     res.json({ success: true, message: "Staff alerted" });
   });
 
+  // API for Barcode Scan Logging (from browser or Python scanner)
+  app.post("/api/scan/log", (req, res) => {
+    const { barcode, source } = req.body;
+    const scanSource = source || "browser";
+    console.log(`[BARCODE SCAN] [${scanSource}] Decoded barcode value: ${barcode}`);
+    console.log(`[BARCODE SCAN] [${scanSource}] Looking up product for barcode: ${barcode}`);
+    
+    // Broadcast barcode to all connected WebSocket clients
+    wss.clients.forEach((client) => {
+      if (client.readyState === 1) { // 1 = OPEN
+        client.send(JSON.stringify({
+          type: 'barcode_scanned',
+          barcode: barcode,
+          source: scanSource,
+          timestamp: new Date().toISOString()
+        }));
+      }
+    });
+    
+    res.json({ success: true });
+  });
+
+  // WebSocket connection handler
+  wss.on('connection', (ws) => {
+    console.log('[WebSocket] Client connected. Total clients:', wss.clients.size);
+    
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message);
+        console.log('[WebSocket] Message from client:', data);
+      } catch (error) {
+        console.log('[WebSocket] Invalid message:', message);
+      }
+    });
+
+    ws.on('close', () => {
+      console.log('[WebSocket] Client disconnected. Total clients:', wss.clients.size);
+    });
+
+    ws.on('error', (error) => {
+      console.error('[WebSocket] Error:', error);
+    });
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -83,8 +131,9 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Shopkeeper Server running on http://localhost:${PORT}`);
+    console.log(`[WebSocket] Ready for real-time barcode scanning`);
   });
 }
 
