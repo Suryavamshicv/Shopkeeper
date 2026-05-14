@@ -1,11 +1,15 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from flask import Flask
+from flask_cors import CORS  
 import cv2
 import numpy as np
 from pyzbar import pyzbar
 import uvicorn
 
-app = FastAPI()
+###app = FastAPI()
+app = Flask(__name__)
+CORS(app)  
 
 # Allow your React app to talk to this server
 app.add_middleware(
