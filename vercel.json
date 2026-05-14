@@ -13,12 +13,12 @@
     },
     {
       "source": "/(.*)",
-      "destination": "/index.html"
-    }
-    ,
+      "destination": "/server.py"
+    },
     {
       "source": "/(.*)",
-      "destination": "/server.py"
+      "destination": "/index.html"
     }
+    
   ]
 }
